@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MultiView">
+<meta name="theme-color" content="#0b0d10">
+<title>MultiView — Apex観戦マルチビュー</title>
+<style>
+:root{
+  --bg:#0b0d10;
+  --panel:#14181f;
+  --panel2:#1b212b;
+  --line:#2a323f;
+  --text:#e8edf5;
+  --dim:#8b97a8;
+  --accent:#ff4655;
+  --yt:#ff0033;
+  --tw:#9146ff;
+  --ok:#3ddc97;
+  --bar: 52px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;}
+body{overscroll-behavior:none}
+
+/* ---------- 視聴画面 ---------- */
+#app{position:fixed;inset:0;display:flex;flex-direction:column;
+  padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);}
+
+#grid{flex:1;display:grid;gap:2px;background:#000;min-height:0;}
+#grid[data-layout="v2"]{grid-template-columns:1fr;grid-template-rows:1fr 1fr}
+#grid[data-layout="h2"]{grid-template-columns:1fr 1fr;grid-template-rows:1fr}
+#grid[data-layout="v3"]{grid-template-columns:1fr;grid-template-rows:1fr 1fr 1fr}
+#grid[data-layout="h3"]{grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr}
+#grid[data-layout="g3"]{grid-template-columns:1fr 1fr;grid-template-rows:1.6fr 1fr}
+#grid[data-layout="g3"] .cell:nth-child(1){grid-column:1/3}
+#grid[data-layout="g4"]{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+#grid[data-layout="g4m"]{grid-template-columns:1fr 1fr 1fr;grid-template-rows:1.7fr 1fr}
+#grid[data-layout="g4m"] .cell:nth-child(1){grid-column:1/4}
+
+.cell{position:relative;background:#000;overflow:hidden;min-width:0;min-height:0;}
+.cell.off{display:none}
+/* ↓ .fill を付けた要素だけを全面表示にする。
+      以前は .cell>div を対象にしていたため、バッジまで100%に広がって
+      動画全体が赤く覆われる不具合があった。 */
+/* flexの高さ計算に左右されず必ずセル全面を埋めるよう絶対配置にする */
+.cell iframe,.cell .fill{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+.cell.audio-active{box-shadow:inset 0 0 0 3px var(--ok)}
+.cell .badge{position:absolute;left:0;top:0;z-index:5;pointer-events:none;
+  width:auto;height:auto;max-width:70%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-size:10px;font-weight:700;letter-spacing:.04em;padding:3px 7px;border-radius:0 0 8px 0;
+  background:rgba(0,0,0,.72);color:#fff;
+  opacity:1;transition:opacity .6s ease}
+.cell .badge.fade{opacity:0}
+.cell .empty{display:flex;align-items:center;justify-content:center;
+  color:#5c6878;font-size:12px;text-align:center;padding:12px;line-height:1.8}
+
+/* ---------- 下部バー ---------- */
+#bar{height:var(--bar);flex:0 0 var(--bar);background:var(--panel);border-top:1px solid var(--line);
+  display:flex;align-items:center;gap:6px;padding:0 8px;}
+#bar .label{font-size:10px;color:var(--dim);letter-spacing:.06em;flex:0 0 auto}
+#audioBtns{display:flex;gap:5px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
+#audioBtns::-webkit-scrollbar{display:none}
+.abtn{flex:0 0 auto;min-width:36px;height:32px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--dim);font-size:13px;font-weight:700;display:flex;
+  align-items:center;justify-content:center;padding:0 9px;cursor:pointer}
+.abtn.on{background:var(--ok);border-color:var(--ok);color:#04241a}
+.iconbtn{flex:0 0 auto;width:38px;height:34px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--text);font-size:15px;display:flex;align-items:center;
+  justify-content:center;cursor:pointer}
+.iconbtn:active{background:#242c38}
+
+/* ---------- 設定パネル ---------- */
+#setup{position:fixed;inset:0;z-index:50;background:var(--bg);overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  padding:calc(env(safe-area-inset-top) + 18px) 16px calc(env(safe-area-inset-bottom) + 28px);}
+#setup.hidden{display:none}
+h1{font-size:19px;margin:0 0 3px}
+.sub{font-size:12px;color:var(--dim);margin:0 0 20px;line-height:1.6}
+h2{font-size:12px;color:var(--dim);letter-spacing:.08em;margin:22px 0 9px;font-weight:600}
+
+.layouts{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px}
+.lay{border:1px solid var(--line);background:var(--panel);border-radius:11px;padding:9px 6px 8px;
+  cursor:pointer;text-align:center}
+.lay.on{border-color:var(--accent);background:#221419}
+.lay .prev{height:30px;display:grid;gap:2px;margin-bottom:6px}
+.lay .prev i{background:#39424f;border-radius:2px;display:block}
+.lay.on .prev i{background:var(--accent)}
+.lay span{font-size:10px;color:var(--dim);letter-spacing:.02em}
+.lay.on span{color:var(--text)}
+
+.srcrow{display:flex;gap:7px;align-items:center;margin-bottom:8px}
+.srcrow.dim{opacity:.4}
+.srcrow .n{flex:0 0 20px;font-size:11px;color:var(--dim);font-weight:700;text-align:center}
+.seg{flex:0 0 auto;display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:var(--panel);color:var(--dim);font-size:10px;font-weight:700;
+  padding:0 8px;height:38px;cursor:pointer;letter-spacing:.03em}
+.seg button.on[data-p="yt"]{background:var(--yt);color:#fff}
+.seg button.on[data-p="tw"]{background:var(--tw);color:#fff}
+input[type=text]{flex:1;min-width:0;height:38px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel);color:var(--text);padding:0 10px;font-size:14px;font-family:inherit}
+input[type=text]::placeholder{color:#4d5766}
+input[type=text]:focus{outline:none;border-color:var(--accent)}
+
+.btn{width:100%;height:48px;border-radius:11px;border:0;background:var(--accent);color:#fff;
+  font-size:15px;font-weight:700;cursor:pointer;margin-top:18px;font-family:inherit}
+.btn.ghost{background:var(--panel);border:1px solid var(--line);color:var(--text);height:42px;
+  font-size:13px;font-weight:600;margin-top:9px}
+
+.presets{display:flex;flex-direction:column;gap:6px}
+.preset{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);
+  border-radius:9px;padding:10px 11px}
+.preset .nm{flex:1;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.preset .meta{font-size:10px;color:var(--dim);flex:0 0 auto}
+.preset .x{flex:0 0 auto;color:var(--dim);font-size:16px;padding:0 4px;cursor:pointer}
+.hint{font-size:11px;color:var(--dim);line-height:1.75;margin-top:8px}
+.warn{background:#2a1a1d;border:1px solid #55272f;color:#ffb3bc;border-radius:9px;padding:11px 12px;
+  font-size:12px;line-height:1.7;margin-bottom:18px}
+code{background:#000;padding:1px 5px;border-radius:4px;font-size:11px;color:#9fd4ff}
+</style>
+</head>
+<body>
+
+<!-- ============ 視聴画面 ============ -->
+<div id="app">
+  <div id="grid" data-layout="v2"></div>
+  <div id="bar">
+    <span class="label">音声</span>
+    <div id="audioBtns"></div>
+    <button class="iconbtn" id="btnLayout" title="レイアウト切替">▦</button>
+    <button class="iconbtn" id="btnReload" title="全部再読み込み">↻</button>
+    <button class="iconbtn" id="btnEdit" title="設定">⚙</button>
+  </div>
+</div>
+
+<!-- ============ 設定画面 ============ -->
+<div id="setup">
+  <h1>MultiView</h1>
+  <p class="sub">YouTube / Twitch を分割画面で同時視聴</p>
+
+  <div id="hostWarn" class="warn" style="display:none"></div>
+
+  <h2>レイアウト</h2>
+  <div class="layouts" id="layouts"></div>
+
+  <h2>配信ソース</h2>
+  <div id="srcs"></div>
+  <p class="hint">
+    URLをそのまま貼り付けでOK（<code>youtube.com/watch?v=…</code> / <code>youtu.be/…</code> /
+    <code>youtube.com/live/…</code> / <code>twitch.tv/チャンネル名</code>）。<br>
+    チャンネル名やIDだけの入力も可。YouTubeはチャンネルID（<code>UC…</code>）を入れると
+    そのチャンネルのライブ配信を自動で拾います。<br><br>
+    薄く表示されている枠は、選択中のレイアウトでは画面に出ません。
+    視聴中に <b>▦</b> ボタンでレイアウトを切り替えれば、そのまま出てきます
+    （<b>切り替えても動画は再生され直しません</b>）。
+  </p>
+
+  <button class="btn" id="btnStart">視聴を開始</button>
+  <button class="btn ghost" id="btnSave">この組み合わせをプリセット保存</button>
+
+  <h2>プリセット</h2>
+  <div class="presets" id="presets"></div>
+</div>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script src="https://embed.twitch.tv/embed/v1.js"></script>
+<script>
+/* ========================================================================
+   MultiView — 個人利用向けマルチビュー
+   ※ Twitch埋め込みは HTTPS のドメイン配信が必須（parent パラメータ）。
+      GitHub Pages / Cloudflare Pages 等に置けば location.hostname が
+      自動で parent に入るので設定不要。
+   ======================================================================== */
+
+const LAYOUTS = {
+  v2 : {label:'縦2分割', count:2, prev:'1fr 1fr / 1fr'},
+  h2 : {label:'横2分割', count:2, prev:'1fr / 1fr 1fr'},
+  v3 : {label:'縦3分割', count:3, prev:'1fr 1fr 1fr / 1fr'},
+  h3 : {label:'横3分割', count:3, prev:'1fr / 1fr 1fr 1fr'},
+  g3 : {label:'メイン+2', count:3, prev:'1.4fr 1fr / 1fr 1fr', span1:2},
+  g4 : {label:'2×2',     count:4, prev:'1fr 1fr / 1fr 1fr'},
+  g4m: {label:'メイン+3', count:4, prev:'1.5fr 1fr / 1fr 1fr 1fr', span1:3},
+};
+const LAYOUT_ORDER = ['v2','h2','v3','h3','g3','g4','g4m'];
+const MAX_CELLS = 4;
+
+let state = {
+  layout : 'v2',
+  srcs   : [ {p:'yt', v:''}, {p:'tw', v:''}, {p:'tw', v:''}, {p:'tw', v:''} ],
+  audio  : -1,
+};
+let players = [];          // アダプタ配列
+
+/* YouTube IFrame API の待機。
+   コールバック(onYouTubeIframeAPIReady)だけに頼ると、読み込みに失敗したときや
+   拡張機能にブロックされたときに永久に待ち続けてしまうため、
+   window.YT を直接見に行き、かつタイムアウトを設ける。 */
+function waitYT(timeout = 6000){
+  return new Promise(res=>{
+    const t0 = Date.now();
+    (function tick(){
+      if(window.YT && window.YT.Player) return res(true);
+      if(Date.now() - t0 > timeout)      return res(false);
+      setTimeout(tick, 80);
+    })();
+  });
+}
+
+/* ---------------- ストレージ ---------------- */
+const LS = {
+  get(k,d){ try{ return JSON.parse(localStorage.getItem(k)) ?? d; }catch(e){ return d; } },
+  set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
+};
+
+/* ---------------- 入力パース ---------------- */
+function parseSource(raw, hint){
+  const s = (raw||'').trim();
+  if(!s) return null;
+  let m;
+  if(/twitch\.tv/i.test(s)){
+    if(m = s.match(/twitch\.tv\/videos\/(\d+)/i))            return {p:'tw',kind:'video',  id:m[1]};
+    if(m = s.match(/twitch\.tv\/([A-Za-z0-9_]{3,30})/))      return {p:'tw',kind:'channel',id:m[1]};
+  }
+  if(/youtu\.be|youtube\.com/i.test(s)){
+    if(m = s.match(/[?&]v=([A-Za-z0-9_-]{11})/))             return {p:'yt',kind:'video',  id:m[1]};
+    if(m = s.match(/youtu\.be\/([A-Za-z0-9_-]{11})/))        return {p:'yt',kind:'video',  id:m[1]};
+    if(m = s.match(/youtube\.com\/live\/([A-Za-z0-9_-]{11})/))return {p:'yt',kind:'video', id:m[1]};
+    if(m = s.match(/youtube\.com\/embed\/([A-Za-z0-9_-]{11})/))return{p:'yt',kind:'video', id:m[1]};
+    if(m = s.match(/channel\/(UC[A-Za-z0-9_-]{16,})/))       return {p:'yt',kind:'channel',id:m[1]};
+  }
+  if(/^UC[A-Za-z0-9_-]{16,}$/.test(s))                       return {p:'yt',kind:'channel',id:s};
+  if(hint==='tw')                                            return {p:'tw',kind:'channel',id:s.replace(/^@/,'')};
+  if(/^[A-Za-z0-9_-]{11}$/.test(s))                          return {p:'yt',kind:'video',  id:s};
+  return {p:'yt',kind:'video',id:s};
+}
+
+/* ---------------- プレーヤー生成 ---------------- */
+/* YouTube の音量操作は postMessage を主軸にする。
+   YT.Player インスタンスが取れなくても enablejsapi=1 だけで制御できるため、
+   API スクリプトの読み込み失敗に影響されない。 */
+function ytPost(ifr, func, args){
+  try{
+    ifr.contentWindow.postMessage(
+      JSON.stringify({event:'command', func:func, args:args||[]}), '*');
+  }catch(e){}
+}
+
+function mountYouTube(cell, src){
+  const base = src.kind==='channel'
+    ? `https://www.youtube.com/embed/live_stream?channel=${encodeURIComponent(src.id)}`
+    : `https://www.youtube.com/embed/${encodeURIComponent(src.id)}`;
+  const params = ['enablejsapi=1','autoplay=1','mute=1','playsinline=1','rel=0','modestbranding=1'];
+  // origin は http(s) のときだけ付ける。file:// では location.origin が "null" になり
+  // YouTube 側が「エラー153（動画プレーヤーの設定エラー）」で再生を拒否するため。
+  if(/^https?:$/.test(location.protocol)) params.push('origin=' + encodeURIComponent(location.origin));
+
+  const ifr = document.createElement('iframe');
+  ifr.id = 'yt_' + Math.random().toString(36).slice(2,9);   // YT.Player 用に id は必須級
+  ifr.src = base + (base.includes('?') ? '&' : '?') + params.join('&');
+  ifr.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+  ifr.allowFullscreen = true;
+  ifr.referrerPolicy = 'strict-origin-when-cross-origin';   // エラー153の予防（YouTube推奨値）
+  cell.appendChild(ifr);
+
+  let loaded = false, pending = null;
+  ifr.addEventListener('load', ()=>{
+    loaded = true;
+    if(pending){ pending(); pending = null; }
+  });
+
+  // API が使えるなら YT.Player も併用（取れなくても postMessage で動く）
+  let yp = null;
+  waitYT().then(ok=>{ if(ok){ try{ yp = new YT.Player(ifr); }catch(e){} } });
+
+  const run = fn => loaded ? fn() : (pending = fn);
+
+  return {
+    mute  (){ run(()=>{ ytPost(ifr,'mute');   try{ yp && yp.mute();   }catch(e){} }); },
+    unmute(){ run(()=>{ ytPost(ifr,'unMute'); ytPost(ifr,'setVolume',[100]);
+                        try{ yp && (yp.unMute(), yp.setVolume(100)); }catch(e){} }); },
+    reload(){ loaded = false; ifr.src = ifr.src; },
+  };
+}
+
+function mountTwitch(cell, src){
+  const host = location.hostname;
+  const box = document.createElement('div');
+  box.className = 'fill';
+  cell.appendChild(box);
+  const opts = { width:'100%', height:'100%', parent:[host], muted:true, autoplay:true, allowfullscreen:true };
+  if(src.kind==='video') opts.video = src.id; else opts.channel = src.id;
+  let tp = null;
+  try { tp = new Twitch.Player(box, opts); }
+  catch(e){ box.innerHTML = '<div class="empty fill">Twitchプレーヤーの読み込みに失敗しました</div>'; }
+  return {
+    mute  (){ try{ tp && tp.setMuted(true); }catch(e){} },
+    unmute(){ try{ tp && (tp.setMuted(false), tp.setVolume(1)); }catch(e){} },
+    reload(){ try{ tp && (src.kind==='video' ? tp.setVideo(src.id,0) : tp.setChannel(src.id)); }catch(e){} },
+  };
+}
+
+/* ---------------- 描画 ---------------- */
+const grid = document.getElementById('grid');
+
+/* 枠は常に MAX_CELLS 個ぶん一度だけ作る。
+   レイアウト変更では作り直さず CSS と表示/非表示だけを切り替えるため、
+   切替のたびに動画が最初から再生され直すことがなくなる。
+   また同期処理のみで組み立てる（1枠の読み込み待ちで他が止まらないように）。 */
+function build(){
+  players = [];
+  grid.innerHTML = '';
+
+  for(let i=0;i<MAX_CELLS;i++){
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.dataset.i = i;
+    grid.appendChild(cell);
+
+    const src = parseSource(state.srcs[i] && state.srcs[i].v, state.srcs[i] && state.srcs[i].p);
+    if(!src){
+      cell.innerHTML = `<div class="empty fill">枠 ${i+1}<br>未設定</div>`;
+      players.push(null);
+      continue;
+    }
+
+    players.push(src.p==='yt' ? mountYouTube(cell, src) : mountTwitch(cell, src));
+
+    // バッジは最後に載せる（プレーヤーより手前に来るように）。数秒で薄く消す
+    const badge = document.createElement('div');
+    badge.className = 'badge ' + src.p;
+    badge.textContent = `${i+1} · ` + (src.p==='yt'?'YouTube':'Twitch') + ' · ' + src.id;
+    cell.appendChild(badge);
+    setTimeout(()=>badge.classList.add('fade'), 4000);
+  }
+
+  applyLayout();
+}
+
+/* レイアウト適用。DOMは壊さずクラスと data 属性だけ変える */
+function applyLayout(){
+  grid.dataset.layout = state.layout;
+  const n = LAYOUTS[state.layout].count;
+  [...grid.children].forEach((c,i)=> c.classList.toggle('off', i >= n));
+  if(state.audio >= n) state.audio = -1;
+  renderAudioBar();
+  applyAudio();
+}
+
+function renderAudioBar(){
+  const wrap = document.getElementById('audioBtns');
+  const n = LAYOUTS[state.layout].count;
+  wrap.innerHTML = '';
+  for(let i=0;i<n;i++){
+    const b = document.createElement('button');
+    b.className = 'abtn' + (state.audio===i ? ' on' : '');
+    b.textContent = i+1;
+    b.onclick = () => { state.audio = (state.audio===i ? -1 : i); renderAudioBar(); applyAudio(); };
+    wrap.appendChild(b);
+  }
+  const mu = document.createElement('button');
+  mu.className = 'abtn' + (state.audio===-1 ? ' on' : '');
+  mu.textContent = '全ミュート';
+  mu.onclick = () => { state.audio = -1; renderAudioBar(); applyAudio(); };
+  wrap.appendChild(mu);
+}
+
+function applyAudio(){
+  players.forEach((p,i)=>{
+    if(!p) return;
+    if(i===state.audio) p.unmute(); else p.mute();
+  });
+  [...grid.children].forEach((c,i)=> c.classList.toggle('audio-active', i===state.audio));
+}
+
+/* ---------------- 設定画面 ---------------- */
+const setup = document.getElementById('setup');
+
+function renderLayouts(){
+  const box = document.getElementById('layouts');
+  box.innerHTML = '';
+  LAYOUT_ORDER.forEach(k=>{
+    const L = LAYOUTS[k];
+    const el = document.createElement('div');
+    el.className = 'lay' + (state.layout===k?' on':'');
+    const prev = document.createElement('div');
+    prev.className = 'prev';
+    prev.style.grid = L.prev;
+    for(let i=0;i<L.count;i++){
+      const b = document.createElement('i');
+      if(i===0 && L.span1) b.style.gridColumn = '1/'+(L.span1+1);
+      prev.appendChild(b);
+    }
+    el.appendChild(prev);
+    const sp = document.createElement('span'); sp.textContent = L.label; el.appendChild(sp);
+    el.onclick = () => { state.layout = k; renderLayouts(); renderSrcs(); };
+    box.appendChild(el);
+  });
+}
+
+function renderSrcs(){
+  const box = document.getElementById('srcs');
+  const n = LAYOUTS[state.layout].count;
+  box.innerHTML = '';
+  // 4枠ぶん常に用意しておく。現在のレイアウトで映らない枠は薄く表示するだけで、
+  // 入力内容は保持される（視聴中に ▦ で枠数を増やせばそのまま出てくる）
+  for(let i=0;i<MAX_CELLS;i++){
+    const row = document.createElement('div');
+    row.className = 'srcrow' + (i >= n ? ' dim' : '');
+    row.innerHTML = `<div class="n">${i+1}</div>
+      <div class="seg">
+        <button data-p="yt" class="${state.srcs[i].p==='yt'?'on':''}">YT</button>
+        <button data-p="tw" class="${state.srcs[i].p==='tw'?'on':''}">TW</button>
+      </div>`;
+    const inp = document.createElement('input');
+    inp.type='text'; inp.value = state.srcs[i].v;
+    inp.placeholder = state.srcs[i].p==='yt' ? 'YouTubeのURL / 動画ID / UC…' : 'twitch.tv/… / チャンネル名';
+    inp.oninput = e => {
+      state.srcs[i].v = e.target.value;
+      const d = parseSource(e.target.value, state.srcs[i].p);
+      if(d && /youtu|twitch/i.test(e.target.value)){ state.srcs[i].p = d.p; renderSrcs(); }
+    };
+    row.appendChild(inp);
+    row.querySelectorAll('.seg button').forEach(b=>{
+      b.onclick = () => { state.srcs[i].p = b.dataset.p; renderSrcs(); };
+    });
+    box.appendChild(row);
+  }
+}
+
+function renderPresets(){
+  const box = document.getElementById('presets');
+  const list = LS.get('mv.presets', []);
+  box.innerHTML = '';
+  if(!list.length){
+    box.innerHTML = '<p class="hint" style="margin:0">保存されたプリセットはありません。</p>';
+    return;
+  }
+  list.forEach((pr, idx)=>{
+    const el = document.createElement('div');
+    el.className = 'preset';
+    const filled = pr.srcs.filter(s=>s.v).length;
+    el.innerHTML = `<div class="nm">${escapeHtml(pr.name)}</div>
+      <div class="meta">${LAYOUTS[pr.layout]?.label||''} · ${filled}枠</div>
+      <div class="x">✕</div>`;
+    el.querySelector('.nm').onclick = () => {
+      state.layout = pr.layout;
+      state.srcs = JSON.parse(JSON.stringify(pr.srcs));
+      renderLayouts(); renderSrcs();
+    };
+    el.querySelector('.meta').onclick = el.querySelector('.nm').onclick;
+    el.querySelector('.x').onclick = (ev) => {
+      ev.stopPropagation();
+      const l = LS.get('mv.presets', []); l.splice(idx,1); LS.set('mv.presets', l); renderPresets();
+    };
+    box.appendChild(el);
+  });
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ---------------- イベント ---------------- */
+document.getElementById('btnStart').onclick = () => {
+  LS.set('mv.last', state);
+  setup.classList.add('hidden');
+  build();
+};
+document.getElementById('btnSave').onclick = () => {
+  const name = prompt('プリセット名', '新しいプリセット');
+  if(!name) return;
+  const l = LS.get('mv.presets', []);
+  l.unshift({ name, layout: state.layout, srcs: JSON.parse(JSON.stringify(state.srcs)) });
+  LS.set('mv.presets', l);
+  renderPresets();
+};
+document.getElementById('btnEdit').onclick = () => {
+  grid.innerHTML = ''; players = [];
+  setup.classList.remove('hidden');
+  renderLayouts(); renderSrcs(); renderPresets();
+};
+document.getElementById('btnReload').onclick = () => build();
+document.getElementById('btnLayout').onclick = () => {
+  const cur = LAYOUT_ORDER.indexOf(state.layout);
+  state.layout = LAYOUT_ORDER[(cur+1) % LAYOUT_ORDER.length];
+  applyLayout();          // 再生中のプレーヤーには一切触れない
+  LS.set('mv.last', state);
+};
+
+/* ---------------- 初期化 ---------------- */
+(function init(){
+  const last = LS.get('mv.last', null);
+  if(last && last.srcs) state = Object.assign(state, last, {audio:-1});
+
+  const h = location.hostname;
+  if(!h || location.protocol === 'file:'){
+    const w = document.getElementById('hostWarn');
+    w.style.display = 'block';
+    w.innerHTML = '⚠️ ファイルを直接開いています（<code>file://</code>）。この状態では'
+                + '<b>YouTube・Twitchとも再生できません</b>。'
+                + 'YouTubeは「エラー153」、Twitchは「misconfigured」になります。<br><br>'
+                + '同じフォルダの <code>ローカルで開く.command</code> をダブルクリックするか、'
+                + 'GitHub Pages に置いたURLから開いてください。';
+  }
+  renderLayouts(); renderSrcs(); renderPresets();
+})();
+</script>
+</body>
+</html>
