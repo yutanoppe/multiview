@@ -2,7 +2,10 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<!-- viewport-fit=cover は付けない。付けるとノッチ下まで描画範囲が広がり、
+     セーフエリアの計算ずれで右端が欠ける原因になる。
+     外すとiOS側が安全な矩形に収めてくれる -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="MultiView">
@@ -22,17 +25,19 @@
   --ok:#3ddc97;
   --bar:52px;
 }
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;color:var(--text);
+/* touch-action:manipulation で iOS のダブルタップ拡大を無効化する。
+   （iOSは user-scalable=no を無視するため、これが実質的な唯一の手段） */
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;}
-body{overscroll-behavior:none}
+body{position:fixed;inset:0;overscroll-behavior:none}
 
 /* ================= 視聴画面 ================= */
-/* バーはグリッドの上に重ねる。隠したぶんだけ映像が広くなる */
-#app{position:fixed;inset:0;overflow:hidden}
+/* バーはグリッドの上に重ねる。隠したぶんだけ映像が広くなる。
+   実寸は JS が visualViewport から測って設定する（下の fitViewport） */
+#app{position:fixed;left:0;top:0;width:100%;height:100%;overflow:hidden}
 
-#grid{position:absolute;inset:0;display:grid;gap:2px;background:#000;
-  padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);}
+#grid{position:absolute;inset:0;display:grid;gap:2px;background:#000;overflow:hidden}
 #grid[data-layout="v2"] {grid-template-columns:1fr;        grid-template-rows:1fr 1fr}
 #grid[data-layout="h2"] {grid-template-columns:1fr 1fr;    grid-template-rows:1fr}
 #grid[data-layout="v3"] {grid-template-columns:1fr;        grid-template-rows:1fr 1fr 1fr}
@@ -82,8 +87,7 @@ body{overscroll-behavior:none}
 
 /* ---------- 下部バー（自動で隠れる） ---------- */
 #bar{position:absolute;left:0;right:0;bottom:0;z-index:30;
-  height:calc(var(--bar) + env(safe-area-inset-bottom));
-  padding:0 8px env(safe-area-inset-bottom);
+  height:var(--bar);padding:0 8px;
   background:rgba(16,20,26,.94);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
   border-top:1px solid var(--line);
   display:flex;align-items:center;gap:6px;
@@ -106,13 +110,18 @@ body{overscroll-behavior:none}
 #edge.off{display:none}
 /* バーを呼び出せることを示す控えめな目印。
    iOSのホームインジケータと重ならないよう右下に置く */
-#pill{position:absolute;right:calc(10px + env(safe-area-inset-right));
-  bottom:calc(8px + env(safe-area-inset-bottom));
+#pill{position:absolute;right:10px;bottom:8px;
   z-index:21;pointer-events:none;
   padding:3px 9px;border-radius:11px;background:rgba(0,0,0,.5);
   color:rgba(255,255,255,.55);font-size:10px;line-height:1;
   opacity:1;transition:opacity .5s ease}
 #pill.off{opacity:0}
+
+/* 画面が拡大されていると右端・下端が欠けるので気付けるようにする */
+#zoomWarn{position:absolute;left:50%;top:8px;transform:translateX(-50%);z-index:40;display:none;
+  background:rgba(255,70,85,.95);color:#fff;font-size:11px;font-weight:700;
+  padding:6px 12px;border-radius:14px;white-space:nowrap}
+#zoomWarn.show{display:block}
 
 /* ================= 設定パネル ================= */
 #setup{position:fixed;inset:0;z-index:50;background:var(--bg);overflow-y:auto;
@@ -170,6 +179,7 @@ code{background:#000;padding:1px 5px;border-radius:4px;font-size:11px;color:#9fd
   <div id="grid" data-layout="L4"></div>
   <div id="edge"></div>
   <div id="pill">▲ メニュー</div>
+  <div id="zoomWarn">画面が拡大されています。ピンチで縮小してください</div>
   <div id="bar">
     <span class="label">音声</span>
     <div id="audioBtns"></div>
@@ -350,10 +360,36 @@ function mountTwitch(cell, src){
 }
 
 /* ---------------- 描画 ---------------- */
-const grid = document.getElementById('grid');
-const bar  = document.getElementById('bar');
-const edge = document.getElementById('edge');
-const pill = document.getElementById('pill');
+const appEl = document.getElementById('app');
+const grid  = document.getElementById('grid');
+const bar   = document.getElementById('bar');
+const edge  = document.getElementById('edge');
+const pill  = document.getElementById('pill');
+
+/* 表示領域を実測して #app に反映する。
+   iOS Safari は position:fixed / 100% がツールバーの出入りやノッチ、
+   拡大操作でずれることがあり、右端や下端が欠ける原因になる。
+   visualViewport の実測値を直接入れることでずれを潰す。 */
+function fitViewport(){
+  const vv = window.visualViewport;
+  const w  = Math.round(vv ? vv.width      : window.innerWidth);
+  const h  = Math.round(vv ? vv.height     : window.innerHeight);
+  const x  = Math.round(vv ? vv.offsetLeft : 0);
+  const y  = Math.round(vv ? vv.offsetTop  : 0);
+  appEl.style.width  = w + 'px';
+  appEl.style.height = h + 'px';
+  appEl.style.left   = x + 'px';
+  appEl.style.top    = y + 'px';
+  const zoomed = !!(vv && vv.scale > 1.02);
+  document.getElementById('zoomWarn').classList.toggle('show', zoomed);
+}
+if(window.visualViewport){
+  visualViewport.addEventListener('resize', fitViewport);
+  visualViewport.addEventListener('scroll', fitViewport);
+}
+window.addEventListener('resize', fitViewport);
+window.addEventListener('orientationchange', ()=> setTimeout(fitViewport, 350));
+fitViewport();
 
 /* 枠は常に MAX_CELLS 個ぶん一度だけ作る。
    レイアウト変更や入れ替えでは作り直さず CSS だけを変えるため、
