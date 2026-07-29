@@ -104,6 +104,8 @@ body{position:fixed;inset:0;overscroll-behavior:none}
   background:var(--panel2);color:var(--dim);font-size:13px;font-weight:700;display:flex;
   align-items:center;justify-content:center;padding:0 9px;cursor:pointer;white-space:nowrap}
 .abtn.on{background:var(--ok);border-color:var(--ok);color:#04241a}
+/* 今のレイアウトで画面に出ていない枠のボタン */
+.abtn.dis{opacity:.32;pointer-events:none}
 .iconbtn{flex:0 0 auto;width:38px;height:34px;border-radius:8px;border:1px solid var(--line);
   background:var(--panel2);color:var(--text);font-size:15px;display:flex;align-items:center;
   justify-content:center;cursor:pointer}
@@ -421,9 +423,11 @@ function build(){
 
     players.push(src.p==='yt' ? mountYouTube(cell, src) : mountTwitch(cell, src));
 
+    // 番号は「枠の番号（＝設定画面の行番号）」で固定する。
+    // 表示位置ではなく配信に紐づくので、入れ替えても番号は変わらない。
     const badge = document.createElement('div');
     badge.className = 'badge ' + src.p;
-    badge.dataset.label = (src.p==='yt'?'YouTube':'Twitch') + ' · ' + src.id;
+    badge.textContent = (i+1) + ' · ' + (src.p==='yt'?'YouTube':'Twitch') + ' · ' + src.id;
     cell.appendChild(badge);
 
     // ダブルタップ検出用の透明レイヤー（サブ枠のときだけ表示される）
@@ -474,10 +478,7 @@ function applyLayout(){
     c.classList.toggle('sub',  pos > 0 && pos < n);
     c.classList.toggle('off',  pos >= n);
     const badge = c.querySelector('.badge');
-    if(badge){
-      badge.textContent = (pos+1) + ' · ' + badge.dataset.label;
-      badge.classList.remove('fade');
-    }
+    if(badge) badge.classList.remove('fade');   // 文字は固定。fadeだけ戻す
     const h = c.querySelector('.swapbtn');
     if(h) h.classList.remove('fade');
   });
@@ -508,16 +509,23 @@ function swapToMain(cellIndex){
   if(c){ c.classList.remove('swapping'); void c.offsetWidth; c.classList.add('swapping'); }
 }
 
+/* 音声ボタンは「枠の番号」で並べる。表示位置とは無関係なので、
+   入れ替えてもボタンの番号と配信の対応は変わらない。
+   画面に出ていない枠のボタンは薄くして押せなくする。 */
 function renderAudioBar(){
   const wrap = document.getElementById('audioBtns');
   const n = LAYOUTS[state.layout].count;
+  const visible = new Set(state.order.slice(0, n));
   wrap.innerHTML = '';
-  for(let pos=0;pos<n;pos++){
-    const ci = state.order[pos];
+  for(let ci=0; ci<MAX_CELLS; ci++){
+    if(!players[ci]) continue;                 // 未設定の枠はボタンを出さない
+    const shown = visible.has(ci);
     const b = document.createElement('button');
-    b.className = 'abtn' + (state.audio === ci ? ' on' : '');
-    b.textContent = pos + 1;
-    b.onclick = () => { state.audio = (state.audio === ci ? -1 : ci); renderAudioBar(); applyAudio(); showBar(); };
+    b.className = 'abtn' + (state.audio === ci ? ' on' : '') + (shown ? '' : ' dis');
+    b.textContent = ci + 1;
+    if(shown){
+      b.onclick = () => { state.audio = (state.audio === ci ? -1 : ci); renderAudioBar(); applyAudio(); showBar(); };
+    }
     wrap.appendChild(b);
   }
   const mu = document.createElement('button');
