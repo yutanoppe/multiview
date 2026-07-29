@@ -75,12 +75,16 @@ body{position:fixed;inset:0;overscroll-behavior:none}
 .cell .badge.tw{background:rgba(145,70,255,.9)}
 .cell .badge.fade{opacity:0}
 
-/* サブ枠のヒント（ダブルタップでメインへ） */
-.cell .hint2{position:absolute;right:0;top:0;z-index:7;pointer-events:none;display:none;
-  font-size:9px;font-weight:700;padding:3px 6px;border-radius:0 0 0 8px;
-  background:rgba(0,0,0,.7);color:#cfe0f5;opacity:1;transition:opacity .6s ease}
-.cell.sub .hint2{display:block}
-.cell .hint2.fade{opacity:0}
+/* サブ枠の「メインにする」ボタン。
+   ダブルタップが効かない環境でも1タップで入れ替えできる逃げ道を必ず残す。
+   .tap（z-index 6）より手前に置く */
+.cell .swapbtn{position:absolute;right:0;top:0;z-index:8;display:none;cursor:pointer;
+  font-size:11px;font-weight:700;padding:6px 9px;border-radius:0 0 0 10px;
+  background:rgba(0,0,0,.72);color:#cfe0f5;opacity:1;transition:opacity .6s ease;
+  touch-action:manipulation;-webkit-user-select:none;user-select:none}
+.cell.sub .swapbtn{display:block}
+.cell .swapbtn.fade{opacity:.3}
+.cell .swapbtn:active{background:var(--ok);color:#04241a}
 
 .cell .empty{display:flex;align-items:center;justify-content:center;
   color:#5c6878;font-size:12px;text-align:center;padding:12px;line-height:1.8}
@@ -422,22 +426,36 @@ function build(){
     badge.dataset.label = (src.p==='yt'?'YouTube':'Twitch') + ' · ' + src.id;
     cell.appendChild(badge);
 
-    const hint = document.createElement('div');
-    hint.className = 'hint2';
-    hint.textContent = '⇱ Wタップ';
-    cell.appendChild(hint);
-
     // ダブルタップ検出用の透明レイヤー（サブ枠のときだけ表示される）
     const tap = document.createElement('div');
     tap.className = 'tap fill';
-    let last = 0;
-    tap.addEventListener('pointerdown', ev=>{
-      ev.preventDefault();
+    let last = 0, lastTouch = 0;
+    const handle = (ev, isTouch) => {
       const now = Date.now();
-      if(now - last < 380){ last = 0; swapToMain(i); }
-      else { last = now; showBar(); }
-    });
+      if(isTouch) lastTouch = now;
+      else if(now - lastTouch < 700) return;   // touchend で処理済みの click は無視
+      if(now - last < 380){
+        // ここで preventDefault することで iOS のダブルタップ拡大を止める
+        if(ev.cancelable) ev.preventDefault();
+        last = 0;
+        swapToMain(i);
+      } else {
+        last = now;
+        showBar();
+      }
+    };
+    tap.addEventListener('touchend', e => handle(e, true), {passive:false});
+    tap.addEventListener('click',    e => handle(e, false));
     cell.appendChild(tap);
+
+    // 1タップで入れ替えられるボタン（ダブルタップが不安定な環境向けの保険）
+    const sw = document.createElement('div');
+    sw.className = 'swapbtn';
+    sw.textContent = '⇱ メイン';
+    const doSwap = ev => { ev.stopPropagation(); if(ev.cancelable) ev.preventDefault(); swapToMain(i); };
+    sw.addEventListener('touchend', doSwap, {passive:false});
+    sw.addEventListener('click', doSwap);
+    cell.appendChild(sw);
   }
   applyLayout();
 }
@@ -460,7 +478,7 @@ function applyLayout(){
       badge.textContent = (pos+1) + ' · ' + badge.dataset.label;
       badge.classList.remove('fade');
     }
-    const h = c.querySelector('.hint2');
+    const h = c.querySelector('.swapbtn');
     if(h) h.classList.remove('fade');
   });
 
@@ -469,7 +487,7 @@ function applyLayout(){
 
   clearTimeout(applyLayout._t);
   applyLayout._t = setTimeout(()=>{
-    grid.querySelectorAll('.badge,.hint2').forEach(e=>e.classList.add('fade'));
+    grid.querySelectorAll('.badge,.swapbtn').forEach(e=>e.classList.add('fade'));
   }, 4000);
 
   renderAudioBar();
@@ -536,6 +554,18 @@ function hideBar(){
 }
 edge.addEventListener('pointerdown', e=>{ e.preventDefault(); showBar(); });
 bar.addEventListener('pointerdown', ()=> showBar());
+
+/* iOS のダブルタップ拡大を止める最後の砦。
+   視聴画面の中で「短い間隔の2回目のタップ」が来たら既定動作を打ち消す。
+   設定画面や入力欄には影響させない（そちらは拡大できたほうが都合がよい）。 */
+let lastTouchEnd = 0;
+appEl.addEventListener('touchend', e => {
+  const t = e.target;
+  if(t && t.closest && t.closest('input,textarea,select')) return;
+  const now = Date.now();
+  if(now - lastTouchEnd < 400 && e.cancelable) e.preventDefault();
+  lastTouchEnd = now;
+}, {passive:false});
 
 /* ---------------- 設定画面 ---------------- */
 const setup = document.getElementById('setup');
